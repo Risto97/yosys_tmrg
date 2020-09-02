@@ -1,3 +1,4 @@
+(* tmrg_do_not_triplicate = "in clk data_out" *)
 module fsm01 (
   input in,
   input in2,
@@ -7,7 +8,6 @@ module fsm01 (
   input clk
 );
   // (* tmrg_triplicate = "default" *)
-  // (* tmrg_do_not_triplicate = "in clk data_out" *)
   // tmrg triplicate default
   // tmrg do_not_triplicate in_
   // tmrg do_not_triplicate clk_
