@@ -39,7 +39,7 @@ module simple_mod (din, dout);
     input din;
     output dout;
 
-    assign dout = din;
+    assign dout = ~din;
 endmodule
 
 // module simple_mod2(din1, din2, dout);

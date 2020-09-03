@@ -255,8 +255,8 @@ bool TMRModule(
   for (auto w : fanout_wires) {
     for (auto s : {"A", "B", "C"}) {
       RTLIL::Wire *wire = addWire(orig, w, s);
-      if(wire->port_input)
-          w->port_input = true;
+      if (wire->port_input)
+        w->port_input = true;
       wire->port_input = false;
       w->port_output = false;
       wire->port_output = false;
@@ -275,17 +275,17 @@ bool TMRModule(
   for (auto w : voter_wires) {
     for (auto s : {"A", "B", "C"}) {
       RTLIL::Wire *wire = addWire(orig, w, s);
-      if (wire->port_output){
+      if (wire->port_output) {
         w->port_output = true;
         w->port_input = false;
         wire->port_output = false;
         wire->port_input = false;
       }
-      if(w->port_input){
-          wire->port_input = true;
-          wire->port_output = false;
-          w->port_input = false;
-          w->port_output = false;
+      if (w->port_input) {
+        wire->port_input = true;
+        wire->port_output = false;
+        w->port_input = false;
+        w->port_output = false;
       }
       orig->fixup_ports();
     }
@@ -310,8 +310,28 @@ bool TMRModule(
           cell->setParam(p.first, p.second.as_int());
         }
         for (auto p : c->connections()) {
-          RTLIL::Wire *wire = addWire(orig, p.second, s);
-          cell->setPort(p.first.str(), wire);
+          if (p.second.is_wire()) {
+            RTLIL::Wire *wire = addWire(orig, p.second, s);
+            cell->setPort(p.first.str(), wire);
+          }
+          else if(p.second.is_fully_const()){
+            RTLIL::SigSpec sig;
+            sig.append(p.second.as_const());
+            cell->setPort(p.first.str(), sig);
+          }
+          else{
+            RTLIL::SigSpec sig;
+            for (auto cn : p.second.chunks()) {
+              if (cn.wire == NULL) {
+                for (auto state : cn.data)
+                  sig.append(state);
+              } else {
+                RTLIL::Wire *wire = addWire(orig, cn.wire, s);
+                sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
+              }
+            }
+            cell->setPort(p.first.str(), sig);
+          }
         }
       }
       orig->remove(c);
@@ -379,4 +399,3 @@ struct TmrgPass : public Pass {
 } TmrgPass;
 
 PRIVATE_NAMESPACE_END
-
