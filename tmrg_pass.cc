@@ -252,43 +252,51 @@ bool TMRModule(
   }
 
   // Add fanouts
-  if (orig->name.str() == "\\fsm01")
-    for (auto w : fanout_wires) {
-      for (auto s : {"A", "B", "C"}) {
-        if (orig->wires_.count(w->name.str() + s) == 0) {
-          RTLIL::Wire *wire = addWire(orig, w, s);
-          wire->port_input = false;
-          wire->port_output = false;
-        }
-      }
-
-      RTLIL::Cell *fn = orig->addCell(NEW_ID, "\\fanout");
-      dont_tmrg.first.emplace(fn);
-      fn->setParam("\\WIDTH", 1);
-      fn->setPort("\\in", w);
-      for (auto s : {"A", "B", "C"})
-        fn->setPort((std::string) "\\out" + s, orig->wire(w->name.str() + s));
+  for (auto w : fanout_wires) {
+    for (auto s : {"A", "B", "C"}) {
+      RTLIL::Wire *wire = addWire(orig, w, s);
+      if(wire->port_input)
+          w->port_input = true;
+      wire->port_input = false;
+      w->port_output = false;
+      wire->port_output = false;
+      orig->fixup_ports();
     }
+
+    RTLIL::Cell *fn = orig->addCell(NEW_ID, "\\fanout");
+    dont_tmrg.first.emplace(fn);
+    fn->setParam("\\WIDTH", 1);
+    fn->setPort("\\in", w);
+    for (auto s : {"A", "B", "C"})
+      fn->setPort((std::string) "\\out" + s, orig->wire(w->name.str() + s));
+  }
 
   // Adding voters
-  if (orig->name.str() == "\\fsm01")
-    for (auto w : voter_wires) {
-      for (auto s : {"A", "B", "C"}) {
-        if (orig->wires_.count(w->name.str() + s) == 0) {
-          RTLIL::Wire *wire = addWire(orig, w, s);
-          wire->port_input = w->port_input;
-          wire->port_output = w->port_output;
-          orig->fixup_ports();
-        }
+  for (auto w : voter_wires) {
+    for (auto s : {"A", "B", "C"}) {
+      RTLIL::Wire *wire = addWire(orig, w, s);
+      if (wire->port_output){
+        w->port_output = true;
+        w->port_input = false;
+        wire->port_output = false;
+        wire->port_input = false;
       }
-
-      RTLIL::Cell *vt = orig->addCell(NEW_ID, "\\majorityVoter");
-      dont_tmrg.first.emplace(vt);
-      vt->setParam("\\WIDTH", 1);
-      vt->setPort("\\out", w);
-      for (auto s : {"A", "B", "C"})
-        vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
+      if(w->port_input){
+          wire->port_input = true;
+          wire->port_output = false;
+          w->port_input = false;
+          w->port_output = false;
+      }
+      orig->fixup_ports();
     }
+
+    RTLIL::Cell *vt = orig->addCell(NEW_ID, "\\majorityVoter");
+    dont_tmrg.first.emplace(vt);
+    vt->setParam("\\WIDTH", 1);
+    vt->setPort("\\out", w);
+    for (auto s : {"A", "B", "C"})
+      vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
+  }
 
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
@@ -313,12 +321,32 @@ bool TMRModule(
   /* Instantiate triplicated user modules as cells */
   for (auto c : orig->selected_cells()) {
     if (c->name.str()[0] == '\\') {
-
+      //
       RTLIL::Cell *newcell = orig->addCell(NEW_ID, c->type);
       for (auto p : c->connections()) {
-        for (auto s : {"A", "B", "C"})
-          newcell->setPort(p.first.str() + s,
-                           orig->wire(p.second.as_wire()->name.str() + s));
+        for (auto s : {"A", "B", "C"}) {
+
+          if (p.second.is_wire()) {
+            newcell->setPort(p.first.str() + s,
+                             orig->wire(p.second.as_wire()->name.str() + s));
+          } else if (p.second.is_fully_const()) {
+            RTLIL::SigSpec sig;
+            sig.append(p.second.as_const());
+            newcell->setPort(p.first.str() + s, sig);
+          } else {
+            RTLIL::SigSpec sig;
+            for (auto cn : p.second.chunks()) {
+              if (cn.wire == NULL) {
+                for (auto state : cn.data)
+                  sig.append(state);
+              } else {
+                RTLIL::Wire *wire = addWire(orig, cn.wire, s);
+                sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
+              }
+            }
+            newcell->setPort(p.first.str() + s, sig);
+          }
+        }
       }
       std::string cell_name = c->name.str();
       orig->remove(c);
@@ -351,3 +379,4 @@ struct TmrgPass : public Pass {
 } TmrgPass;
 
 PRIVATE_NAMESPACE_END
+
