@@ -101,17 +101,12 @@ bool TMRModule(
   std::set<RTLIL::Wire *> voter_wires;
   std::set<RTLIL::Wire *> fanout_wires;
 
-  log("\n#####################################\nProcessing module %s\n\n",
-      orig->name.str().c_str());
-
   /* Get a list of do not tmrg from attribute */
   if (orig->has_attribute("\\tmrg_do_not_triplicate")) {
     std::string attr = orig->get_string_attribute("\\tmrg_do_not_triplicate");
     std::vector<std::string> v = split(attr, ' ');
-    // for (auto i : v)
-    //     log("Attribute: %s\n", i.c_str());
     for (auto s : v) {
-        std::string wn = "\\" + s;
+      std::string wn = "\\" + s;
       if (orig->wires_.count(wn))
         dont_tmrg.second.emplace(orig->wire(wn));
     }
@@ -120,24 +115,18 @@ bool TMRModule(
   /* Get list of do not tmrg Cells and Wires */
   for (auto w : orig->selected_wires()) {
     if (dont_tmrg.second.count(w)) {
-      log("Wire: %s\n", w->name.str().c_str());
       if (!w->port_input && !w->port_output) {
         std::vector<RTLIL::Wire *> stmnt_w = group_statement_wires(w, orig);
         std::vector<RTLIL::Cell *> stmnt_c = group_statement_cells(w, orig);
 
-        for (auto cl : stmnt_c) {
+        for (auto cl : stmnt_c)
           dont_tmrg.first.emplace(cl);
-          log("Add to dont_tmrg cell: %s\n", cl->name.str().c_str());
-        }
 
-        log("\n");
         for (auto p : stmnt_w) {
           // Add statement wires to dont tmrg list if it is private
-          if (!obj_is_public(p->name)) {
-            if (dont_tmrg.second.count(p) == 0)
-              log("Add to dont_tmrg wire: %s\n", p->name.str().c_str());
+          if (!obj_is_public(p->name))
             dont_tmrg.second.emplace(p);
-          } else
+          else
             voter_wires.emplace(p);
         }
       }
@@ -153,16 +142,6 @@ bool TMRModule(
       fanout_wires.emplace(w);
   }
 
-  log("\n");
-  for (auto w : voter_wires) {
-    log("Voter wire: %s\n", w->name.str().c_str());
-  }
-  log("\n");
-  for (auto w : fanout_wires) {
-    log("Fanout wire: %s\n", w->name.str().c_str());
-  }
-
-  log("\n");
   /* Get list of connections */
   std::vector<std::pair<std::string, std::string>> conn_names;
   for (auto con : orig->connections()) {
@@ -180,18 +159,12 @@ bool TMRModule(
       conn_names.push_back(pair);
     }
   }
-  for (auto con : conn_names) {
-    log("Connection Second: %s, First: %s\n", con.second.c_str(),
-        con.first.c_str());
-  }
 
   orig->connections_.clear();
-  log("\n");
+
   // Triplicating tmrg wires and ports not on the list
   for (auto w : orig->selected_wires()) {
-    log("Selected wire: %s\n", w->name.str().c_str());
     if (dont_tmrg.second.count(w) == 0) {
-      log("Triplicating Wire: %s\n", w->name.str().c_str());
       for (auto s : {"A", "B", "C"}) {
         RTLIL::Wire *wire = orig->addWire(w->name.str() + s, w->width);
         wire->port_input = w->port_input;
@@ -201,11 +174,9 @@ bool TMRModule(
     }
   }
 
-  log("\n");
   // Add fanouts
   if (orig->name.str() == "\\fsm01")
     for (auto w : fanout_wires) {
-      log("Triplicating dont tmrg Wire: %s\n", w->name.str().c_str());
       for (auto s : {"A", "B", "C"}) {
         if (orig->wires_.count(w->name.str() + s) == 0) {
           RTLIL::Wire *wire = orig->addWire(w->name.str() + s, w->width);
@@ -213,7 +184,7 @@ bool TMRModule(
           wire->port_output = false;
         }
       }
-      log("Adding fanout on: %s\n", w->name.str().c_str());
+
       RTLIL::Cell *fn = orig->addCell(NEW_ID, "\\fanout");
       dont_tmrg.first.emplace(fn);
       fn->setParam("\\WIDTH", 1);
@@ -222,14 +193,9 @@ bool TMRModule(
         fn->setPort((std::string) "\\out" + s, orig->wire(w->name.str() + s));
     }
 
-  log("\n");
-  log("\n");
-
   // Adding voters
   if (orig->name.str() == "\\fsm01")
     for (auto w : voter_wires) {
-      log("Triplicating dont tmrg Wire: %s\n", w->name.str().c_str());
-      log("Adding voter on: %s\n", w->name.str().c_str());
       for (auto s : {"A", "B", "C"}) {
         if (orig->wires_.count(w->name.str() + s) == 0) {
           RTLIL::Wire *wire = orig->addWire(w->name.str() + s, w->width);
@@ -238,7 +204,7 @@ bool TMRModule(
           orig->fixup_ports();
         }
       }
-      log("Adding voter on: %s\n", w->name.str().c_str());
+
       RTLIL::Cell *vt = orig->addCell(NEW_ID, "\\majorityVoter");
       dont_tmrg.first.emplace(vt);
       vt->setParam("\\WIDTH", 1);
@@ -247,21 +213,17 @@ bool TMRModule(
         vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
     }
 
-  log("\n");
   /* Connecting Wires and Ports */
   for (auto pair : conn_names) {
-    log("Connecting %s to %s\n", pair.second.c_str(), pair.first.c_str());
     orig->connect(orig->wire(pair.first), orig->wire(pair.second));
     // conn_names.pop_back();
   }
 
-  log("\n");
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
     if (c->name.str()[0] == '\\' || dont_tmrg.first.count(c)) {
       continue;
     } else {
-      log("\nTriplicating cell: %s\n", c->name.str().c_str());
       for (auto s : {"A", "B", "C"}) {
         RTLIL::Cell *cell = orig->addCell(NEW_ID, c->type);
 
@@ -270,7 +232,6 @@ bool TMRModule(
         }
         for (auto p : c->connections()) {
           std::string conn_to = p.second.as_wire()->name.str() + s;
-          log("First: %s, second %s\n", p.first.c_str(), conn_to.c_str());
           cell->setPort(p.first.str(), orig->wire(conn_to));
         }
       }
@@ -278,28 +239,20 @@ bool TMRModule(
     }
   }
 
-  log("\n");
   /* Instantiate triplicated user modules as cells */
   for (auto c : orig->selected_cells()) {
     if (c->name.str()[0] == '\\') {
-      log("Cell is: %s\n", log_id(c->name));
-      // log_cell(c);
 
       RTLIL::Cell *newcell = orig->addCell(NEW_ID, c->type);
       for (auto p : c->connections()) {
-        for (auto s : {"A", "B", "C"}) {
+        for (auto s : {"A", "B", "C"})
           newcell->setPort(p.first.str() + s,
                            orig->wire(p.second.as_wire()->name.str() + s));
-        }
       }
       std::string cell_name = c->name.str();
       orig->remove(c);
       orig->rename(newcell, cell_name);
     }
-    // for (auto p : c->connections()) {
-    //   log("Connection is: %s to: %s\n", log_id(p.first),
-    //   log_signal(p.second));
-    // }
   }
 
   return true;
@@ -309,27 +262,12 @@ struct TmrgPass : public Pass {
   TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
   void execute(std::vector<std::string>, RTLIL::Design *design) override {
 
-    log("\n\n\n########## STARTING TMRG PASS ####################\n\n\n");
-    RTLIL::Module *orig = design->modules_["\\fsm01"];
-
-    std::set<RTLIL::Wire *> dont_tmrg_wires;
-    std::set<RTLIL::Cell *> dont_tmrg_cells;
     std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg_list;
-    dont_tmrg_list.first = dont_tmrg_cells;
 
     for (auto mod : design->selected_modules()) {
       //   // TODO USE SELECTION to exclude voter and fanout???
-      if (mod->name.str() != "\\majorityVoter" &&
-          mod->name.str() != "\\fanout") {
-        if (mod->name.str() == "\\fsm01") {
-          // dont_tmrg_wires.insert(orig->wire("\\in_buf"));
-          // dont_tmrg_wires.insert(orig->wire("\\in3"));
-          // dont_tmrg_wires.insert(orig->wire("\\data_out"));
-          dont_tmrg_list.second = dont_tmrg_wires;
-        } else
-          dont_tmrg_list.second.clear();
+      if (mod->name.str() != "\\majorityVoter" && mod->name.str() != "\\fanout")
         TMRModule(mod, dont_tmrg_list);
-      }
     }
 
     run_pass("opt_clean");
