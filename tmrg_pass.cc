@@ -1,5 +1,6 @@
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
+#include <cstddef>
 #include <iterator>
 #include <regex>
 #include <set>
@@ -119,6 +120,7 @@ bool TMRModule(
     RTLIL::Module *orig,
     std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg) {
 
+  pool<RTLIL::Wire *> remove_wires_list;
   std::set<RTLIL::Wire *> voter_wires;
   std::set<RTLIL::Wire *> fanout_wires;
 
@@ -154,10 +156,6 @@ bool TMRModule(
     }
   }
 
-  for(auto w : dont_tmrg.second){
-    log("DONT TMRG WIRE: %s\n", w->name.str().c_str());
-  }
-
   /* Find wires that need a fanout or a voter */
   for (auto w : dont_tmrg.second) {
     if (w->port_output)
@@ -171,7 +169,6 @@ bool TMRModule(
 
   std::vector<std::pair<std::string, std::string>> conn_names;
 
-  log_module(orig);
   std::vector<RTLIL::SigSig> connection_list;
   for (auto con : orig->connections()) {
     RTLIL::SigSpec first;
@@ -185,8 +182,13 @@ bool TMRModule(
       } else {
         RTLIL::SigSpec sig;
         for (auto c : con.first.chunks()) {
-          RTLIL::Wire *wire = addWire(orig, c.wire, s);
-          sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
+          if (c.wire == NULL) {
+            for (auto state : c.data)
+              sig.append(state);
+          } else {
+            RTLIL::Wire *wire = addWire(orig, c.wire, s);
+            sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
+          }
         }
         first = sig;
       }
@@ -198,8 +200,13 @@ bool TMRModule(
       } else {
         RTLIL::SigSpec sig;
         for (auto c : con.second.chunks()) {
-          RTLIL::Wire *wire = addWire(orig, c.wire, s);
-          sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
+          if (c.wire == NULL) {
+            for (auto state : c.data)
+              sig.append(state);
+          } else {
+            RTLIL::Wire *wire = addWire(orig, c.wire, s);
+            sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
+          }
         }
         second = sig;
       }
@@ -211,16 +218,11 @@ bool TMRModule(
     }
   }
 
-  // for(auto c : connection_list){
-  //   log("Connection second: %s first: %s\n", c.second.as_wire()->name.str().c_str(), c.first.as_wire()->name.str().c_str());
-  // }
   /* Fixup ports */
-
   std::vector<std::string> port_names;
   for (auto p : orig->ports) {
     port_names.push_back(p.str());
   }
-  log("\n\n\n");
 
   for (auto w : port_names) {
     RTLIL::Wire *port = orig->wire(w);
@@ -236,11 +238,15 @@ bool TMRModule(
     }
     port->port_input = false;
     port->port_output = false;
-      orig->fixup_ports();
+    /* If wire is not on these lists, it is safe to delete */
+    if (!voter_wires.count(port) && !dont_tmrg.second.count(port) &&
+        !fanout_wires.count(port))
+      remove_wires_list.emplace(port);
+    orig->fixup_ports();
   }
 
-
   // orig->connections_.clear();
+  /* Connecting Wires and Ports */
   for (auto pair : connection_list) {
     orig->connect(pair.first, pair.second);
   }
@@ -284,11 +290,6 @@ bool TMRModule(
         vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
     }
 
-  /* Connecting Wires and Ports */
-  // for (auto pair : connection_list) {
-  //   orig->connect(pair.first, pair.second);
-  // }
-  
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
     if (c->name.str()[0] == '\\' || dont_tmrg.first.count(c)) {
@@ -324,6 +325,9 @@ bool TMRModule(
       orig->rename(newcell, cell_name);
     }
   }
+
+  /* Remove old wires */
+  orig->remove(remove_wires_list);
 
   return true;
 }

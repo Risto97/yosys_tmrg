@@ -3,10 +3,11 @@ module concat(
   input [5:0] i2,
   input [5:0] i3,
   output [10:0] x1,
-  output [5:0] x2
+  output [7:0] x2
 );
-  assign x1 = {i1[2:3], i2[0:4], i3[0:1], i1[0:1]};
-  assign {x2[0], x2[5], x2[1:4]} = {i1[0:2], i2[2:5]}; 
+  assign x1 = { i2[0:4], i3[0:1]};
+  assign x2 = i1;
+  // assign {x2[0], x2[5], x2[1:4]} = {i1[0:2], i2[2:5]}; 
 endmodule
 //
 // module m2(
