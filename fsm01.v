@@ -1,11 +1,11 @@
-(* tmrg_do_not_triplicate = "in clk data_out" *)
+(* tmrg_do_not_triplicate = "in_buf" *)
 module fsm01 (
   input in,
   input in2,
-  input in3,
-  output data_out,
-  output out2,
-  input clk
+  // input in3,
+  output data_out
+  // output out2,
+  // input clk
 );
   // (* tmrg_triplicate = "default" *)
   // tmrg triplicate default
@@ -14,22 +14,22 @@ module fsm01 (
   // tmrg do_not_triplicate data_out_
   // tmrg do_not_triplicate in_buf
   wire state;
-  reg stateNext;
-
-  always @(posedge clk)
-    state <= stateNext;
-
-  always @(state or in)
-    stateNext = in_buf ^ state;
-
-    
-    // wire in_buf;
+  // reg stateNext;
+    wire in_buf;
+  //
+  // always @(posedge clk)
+  //   state <= stateNext;
+  //
+  // always @(state or in)
+  //   stateNext = in_buf ^ state;
+  //
+  //   
     // assign in_buf = in;
-    // wire in_inv;
+    assign state = ~in2;
     assign in_buf = (~in) & (~in2) & state;
-    assign out2 = ~in3;
+    // assign out2 = ~in3;
     // assign in_inv = ~in;
-// assign data_out = state;
+// assign data_out = in_buf;
 simple_mod sm1(.din(in_buf), .dout(data_out));
 // simple_mod2 sm2(.din1(state), .din2(in_buf), .dout(out2));
 

@@ -16,6 +16,7 @@
             "-DYOSYS_ENABLE_PLUGINS",
             "-DYOSYS_ENABLE_GLOB",
             "-DYOSYS_ENABLE_ZLIB",
+            "-I/usr/include/tcl8.6",
             "-DYOSYS_ENABLE_TCL",
             "-DYOSYS_ENABLE_ABC",
             "-DYOSYS_ENABLE_COVER",

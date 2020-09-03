@@ -23,6 +23,27 @@ std::vector<std::string> split(const std::string &s, char delim) {
   return result;
 }
 
+bool TMR_wire_exist(RTLIL::Module *mod, RTLIL::IdString id, std::string sufix) {
+  if (mod->wires_.count(id.str() + sufix))
+    return true;
+  else
+    return false;
+}
+
+RTLIL::Wire *addWire(RTLIL::Module *mod, RTLIL::SigSpec sig,
+                     std::string sufix) {
+  RTLIL::Wire *wire;
+  if (!sig.is_wire())
+    return NULL;
+
+  if (!TMR_wire_exist(mod, sig.as_wire()->name, sufix))
+    wire =
+        mod->addWire(sig.as_wire()->name.str() + sufix, sig.as_wire()->width);
+  else
+    wire = mod->wire(sig.as_wire()->name.str() + sufix);
+  return wire;
+}
+
 struct obj_src {
   bool is_private;
   std::string fn;
@@ -133,6 +154,10 @@ bool TMRModule(
     }
   }
 
+  for(auto w : dont_tmrg.second){
+    log("DONT TMRG WIRE: %s\n", w->name.str().c_str());
+  }
+
   /* Find wires that need a fanout or a voter */
   for (auto w : dont_tmrg.second) {
     if (w->port_output)
@@ -143,35 +168,81 @@ bool TMRModule(
   }
 
   /* Get list of connections */
-  std::vector<std::pair<std::string, std::string>> conn_names;
-  for (auto con : orig->connections()) {
 
-    std::pair<std::string, std::string> pair;
-    if (dont_tmrg.second.count(con.first.as_wire()) == 0)
-      for (auto s : {"A", "B", "C"}) {
-        pair.first = con.first.as_wire()->name.str() + s;
-        pair.second = con.second.as_wire()->name.str() + s;
-        conn_names.push_back(pair);
+  std::vector<std::pair<std::string, std::string>> conn_names;
+
+  log_module(orig);
+  std::vector<RTLIL::SigSig> connection_list;
+  for (auto con : orig->connections()) {
+    RTLIL::SigSpec first;
+    RTLIL::SigSpec second;
+
+    for (auto s : {"A", "B", "C"}) {
+      if (con.first.is_wire()) {
+        RTLIL::Wire *wire = addWire(orig, con.first, s);
+        first = wire;
+
+      } else {
+        RTLIL::SigSpec sig;
+        for (auto c : con.first.chunks()) {
+          RTLIL::Wire *wire = addWire(orig, c.wire, s);
+          sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
+        }
+        first = sig;
       }
-    else {
-      pair.first = con.first.as_wire()->name.str();
-      pair.second = con.second.as_wire()->name.str();
-      conn_names.push_back(pair);
+
+      if (con.second.is_wire()) {
+        RTLIL::Wire *wire = addWire(orig, con.second, s);
+        second = wire;
+
+      } else {
+        RTLIL::SigSpec sig;
+        for (auto c : con.second.chunks()) {
+          RTLIL::Wire *wire = addWire(orig, c.wire, s);
+          sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
+        }
+        second = sig;
+      }
+
+      RTLIL::SigSig connection;
+      connection.first = first;
+      connection.second = second;
+      connection_list.push_back(connection);
     }
   }
 
-  orig->connections_.clear();
+  // for(auto c : connection_list){
+  //   log("Connection second: %s first: %s\n", c.second.as_wire()->name.str().c_str(), c.first.as_wire()->name.str().c_str());
+  // }
+  /* Fixup ports */
 
-  // Triplicating tmrg wires and ports not on the list
-  for (auto w : orig->selected_wires()) {
-    if (dont_tmrg.second.count(w) == 0) {
-      for (auto s : {"A", "B", "C"}) {
-        RTLIL::Wire *wire = orig->addWire(w->name.str() + s, w->width);
-        wire->port_input = w->port_input;
-        wire->port_output = w->port_output;
-        orig->fixup_ports();
-      }
+  std::vector<std::string> port_names;
+  for (auto p : orig->ports) {
+    port_names.push_back(p.str());
+  }
+  log("\n\n\n");
+
+  for (auto w : port_names) {
+    RTLIL::Wire *port = orig->wire(w);
+    for (auto s : {"A", "B", "C"}) {
+      RTLIL::Wire *wire;
+      if (orig->wires_.count(w + s) == 0)
+        wire = orig->addWire(w + s);
+      else
+        wire = orig->wire(w + s);
+      wire->port_input = port->port_input;
+      wire->port_output = port->port_output;
+      orig->fixup_ports();
     }
+    port->port_input = false;
+    port->port_output = false;
+      orig->fixup_ports();
+  }
+
+
+  // orig->connections_.clear();
+  for (auto pair : connection_list) {
+    orig->connect(pair.first, pair.second);
   }
 
   // Add fanouts
@@ -179,7 +250,7 @@ bool TMRModule(
     for (auto w : fanout_wires) {
       for (auto s : {"A", "B", "C"}) {
         if (orig->wires_.count(w->name.str() + s) == 0) {
-          RTLIL::Wire *wire = orig->addWire(w->name.str() + s, w->width);
+          RTLIL::Wire *wire = addWire(orig, w, s);
           wire->port_input = false;
           wire->port_output = false;
         }
@@ -198,7 +269,7 @@ bool TMRModule(
     for (auto w : voter_wires) {
       for (auto s : {"A", "B", "C"}) {
         if (orig->wires_.count(w->name.str() + s) == 0) {
-          RTLIL::Wire *wire = orig->addWire(w->name.str() + s, w->width);
+          RTLIL::Wire *wire = addWire(orig, w, s);
           wire->port_input = w->port_input;
           wire->port_output = w->port_output;
           orig->fixup_ports();
@@ -214,11 +285,10 @@ bool TMRModule(
     }
 
   /* Connecting Wires and Ports */
-  for (auto pair : conn_names) {
-    orig->connect(orig->wire(pair.first), orig->wire(pair.second));
-    // conn_names.pop_back();
-  }
-
+  // for (auto pair : connection_list) {
+  //   orig->connect(pair.first, pair.second);
+  // }
+  
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
     if (c->name.str()[0] == '\\' || dont_tmrg.first.count(c)) {
@@ -231,8 +301,8 @@ bool TMRModule(
           cell->setParam(p.first, p.second.as_int());
         }
         for (auto p : c->connections()) {
-          std::string conn_to = p.second.as_wire()->name.str() + s;
-          cell->setPort(p.first.str(), orig->wire(conn_to));
+          RTLIL::Wire *wire = addWire(orig, p.second, s);
+          cell->setPort(p.first.str(), wire);
         }
       }
       orig->remove(c);
