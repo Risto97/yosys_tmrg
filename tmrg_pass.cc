@@ -229,7 +229,7 @@ bool TMRModule(
     for (auto s : {"A", "B", "C"}) {
       RTLIL::Wire *wire;
       if (orig->wires_.count(w + s) == 0)
-        wire = orig->addWire(w + s);
+        wire = orig->addWire(w + s, port->width);
       else
         wire = orig->wire(w + s);
       wire->port_input = port->port_input;
