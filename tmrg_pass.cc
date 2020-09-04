@@ -313,13 +313,11 @@ bool TMRModule(
           if (p.second.is_wire()) {
             RTLIL::Wire *wire = addWire(orig, p.second, s);
             cell->setPort(p.first.str(), wire);
-          }
-          else if(p.second.is_fully_const()){
+          } else if (p.second.is_fully_const()) {
             RTLIL::SigSpec sig;
             sig.append(p.second.as_const());
             cell->setPort(p.first.str(), sig);
-          }
-          else{
+          } else {
             RTLIL::SigSpec sig;
             for (auto cn : p.second.chunks()) {
               if (cn.wire == NULL) {
@@ -347,25 +345,25 @@ bool TMRModule(
         for (auto s : {"A", "B", "C"}) {
 
           if (p.second.is_wire()) {
-            newcell->setPort(p.first.str() + s,
-                             orig->wire(p.second.as_wire()->name.str() + s));
+            RTLIL::Wire *wire = addWire(orig, p.second, s);
+            newcell->setPort(p.first.str() + s, wire);
           } else if (p.second.is_fully_const()) {
-            RTLIL::SigSpec sig;
-            sig.append(p.second.as_const());
-            newcell->setPort(p.first.str() + s, sig);
+                RTLIL::SigSpec sig;
+                sig.append(p.second.as_const());
+                newcell->setPort(p.first.str() + s, sig);
           } else {
-            RTLIL::SigSpec sig;
-            for (auto cn : p.second.chunks()) {
-              if (cn.wire == NULL) {
-                for (auto state : cn.data)
-                  sig.append(state);
-              } else {
-                RTLIL::Wire *wire = addWire(orig, cn.wire, s);
-                sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
-              }
-            }
-            newcell->setPort(p.first.str() + s, sig);
+                RTLIL::SigSpec sig;
+                for (auto cn : p.second.chunks()) {
+                  if (cn.wire == NULL) {
+                    for (auto state : cn.data)
+                      sig.append(state);
+                  } else {
+                    RTLIL::Wire *wire = addWire(orig, cn.wire, s);
+                    sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
+                  }
           }
+              newcell->setPort(p.first.str() + s, sig);
+            }
         }
       }
       std::string cell_name = c->name.str();

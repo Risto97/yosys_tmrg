@@ -24,6 +24,10 @@ case01: tmrg_pass.so
 	yosys -ql test1.log -m ./tmrg_pass.so -p "proc; debug tmrg_pass; show case01; write_verilog -norename -noattr out.v" tests/verilog/case01.v voter.v fanout.v
 	cat test1.log
 
+hier01: tmrg_pass.so
+	yosys -ql test1.log -m ./tmrg_pass.so -p "proc; debug tmrg_pass; show hier01; write_verilog -norename -noattr out.v" tests/verilog/hier01.v voter.v fanout.v
+	cat test1.log
+
 generate: tmrg_pass.so
 	yosys -ql test1.log -m ./tmrg_pass.so -p "proc; debug tmrg_pass; show gen; write_verilog -norename -noattr out.v" tests/verilog/generate01.v voter.v fanout.v
 	cat test1.log
