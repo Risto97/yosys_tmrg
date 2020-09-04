@@ -262,9 +262,10 @@ bool TMRModule(
       wire->port_output = false;
       orig->fixup_ports();
       // Delete old connections that were in place of fanout input
-    for(auto c = orig->connections_.begin(); c < orig->connections_.end(); c++)
-      if(c->first == wire || c->second == wire)
-        orig->connections_.erase(c);
+      for (auto c = orig->connections_.begin(); c < orig->connections_.end();
+           c++)
+        if (c->first == wire || c->second == wire)
+          orig->connections_.erase(c);
     }
 
     RTLIL::Cell *fn = orig->addCell(w->name.str() + "_fanout", "\\fanout");
@@ -295,15 +296,16 @@ bool TMRModule(
       orig->fixup_ports();
     }
 
-    RTLIL::Cell *vt = orig->addCell(w->name.str() + "_voter", "\\majorityVoter");
+    RTLIL::Cell *vt =
+        orig->addCell(w->name.str() + "_voter", "\\majorityVoter");
     dont_tmrg.first.emplace(vt);
     vt->setParam("\\WIDTH", 1);
     vt->setPort("\\out", w);
     for (auto s : {"A", "B", "C"})
       vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
     // Delete old connection that was connected to fanout output wire
-    for(auto c = orig->connections_.begin(); c < orig->connections_.end(); c++)
-      if(c->first == w || c->second == w)
+    for (auto c = orig->connections_.begin(); c < orig->connections_.end(); c++)
+      if (c->first == w || c->second == w)
         orig->connections_.erase(c);
   }
 
@@ -347,7 +349,8 @@ bool TMRModule(
 
   /* Instantiate triplicated user modules as cells */
   for (auto c : orig->selected_cells()) {
-    if (c->type.str()[0] == '\\' && c->type.str() != "\\majorityVoter" && c->type.str() != "\\fanout") {
+    if (c->type.str()[0] == '\\' && c->type.str() != "\\majorityVoter" &&
+        c->type.str() != "\\fanout") {
       //
       RTLIL::Cell *newcell = orig->addCell(NEW_ID, c->type);
       for (auto p : c->connections()) {
@@ -382,14 +385,36 @@ bool TMRModule(
   }
 
   /* Remove old wires */
-  for (auto w : remove_wires_list) {
-    for (auto c = orig->connections_.begin(); c < orig->connections_.end(); c++) {
-      if (c->first == w) {
-        orig->connections_.erase(c);
+
+  for (auto c = orig->connections_.begin(); c < orig->connections_.end(); c++) {
+    bool delete_conn = false;
+    if (c->first.is_wire())
+      if (remove_wires_list.count(c->first.as_wire()))
+        delete_conn = true;
+
+    if (c->second.is_wire())
+      if (remove_wires_list.count(c->second.as_wire()))
+        delete_conn = true;
+
+    if (!c->first.is_wire()) {
+      for (auto chunk : c->first.chunks()) {
+        if (chunk.wire != NULL)
+          if (remove_wires_list.count(chunk.wire))
+            delete_conn = true;
       }
-      if (c->second == w) {
-        orig->connections_.erase(c);
+    }
+
+    if (!c->second.is_wire()) {
+      for (auto chunk : c->second.chunks()) {
+        if (chunk.wire != NULL)
+          if (remove_wires_list.count(chunk.wire))
+            delete_conn = true;
       }
+    }
+
+    if (delete_conn) {
+      orig->connections_.erase(c);
+      c--;
     }
   }
 
