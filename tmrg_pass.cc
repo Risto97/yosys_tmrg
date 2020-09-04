@@ -261,6 +261,10 @@ bool TMRModule(
       w->port_output = false;
       wire->port_output = false;
       orig->fixup_ports();
+      // Delete old connections that were in place of fanout input
+    for(auto c = orig->connections_.begin(); c < orig->connections_.end(); c++)
+      if(c->first == wire || c->second == wire)
+        orig->connections_.erase(c);
     }
 
     RTLIL::Cell *fn = orig->addCell(w->name.str() + "_fanout", "\\fanout");
@@ -269,6 +273,7 @@ bool TMRModule(
     fn->setPort("\\in", w);
     for (auto s : {"A", "B", "C"})
       fn->setPort((std::string) "\\out" + s, orig->wire(w->name.str() + s));
+
   }
 
   // Adding voters
@@ -296,6 +301,10 @@ bool TMRModule(
     vt->setPort("\\out", w);
     for (auto s : {"A", "B", "C"})
       vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
+    // Delete old connection that was connected to fanout output wire
+    for(auto c = orig->connections_.begin(); c < orig->connections_.end(); c++)
+      if(c->first == w || c->second == w)
+        orig->connections_.erase(c);
   }
 
   /* Triplicate yosys cells */
@@ -348,22 +357,22 @@ bool TMRModule(
             RTLIL::Wire *wire = addWire(orig, p.second, s);
             newcell->setPort(p.first.str() + s, wire);
           } else if (p.second.is_fully_const()) {
-                RTLIL::SigSpec sig;
-                sig.append(p.second.as_const());
-                newcell->setPort(p.first.str() + s, sig);
+            RTLIL::SigSpec sig;
+            sig.append(p.second.as_const());
+            newcell->setPort(p.first.str() + s, sig);
           } else {
-                RTLIL::SigSpec sig;
-                for (auto cn : p.second.chunks()) {
-                  if (cn.wire == NULL) {
-                    for (auto state : cn.data)
-                      sig.append(state);
-                  } else {
-                    RTLIL::Wire *wire = addWire(orig, cn.wire, s);
-                    sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
-                  }
-          }
-              newcell->setPort(p.first.str() + s, sig);
+            RTLIL::SigSpec sig;
+            for (auto cn : p.second.chunks()) {
+              if (cn.wire == NULL) {
+                for (auto state : cn.data)
+                  sig.append(state);
+              } else {
+                RTLIL::Wire *wire = addWire(orig, cn.wire, s);
+                sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
+              }
             }
+            newcell->setPort(p.first.str() + s, sig);
+          }
         }
       }
       std::string cell_name = c->name.str();
@@ -393,6 +402,7 @@ struct TmrgPass : public Pass {
   TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
   void execute(std::vector<std::string>, RTLIL::Design *design) override {
 
+    log("#### Running TMRG PASS ####\n");
     std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg_list;
 
     for (auto mod : design->selected_modules()) {
@@ -401,9 +411,9 @@ struct TmrgPass : public Pass {
         TMRModule(mod, dont_tmrg_list);
     }
 
-    run_pass("opt_clean");
-    run_pass("rmports");
-    run_pass("opt_clean");
+    // run_pass("opt_clean");
+    // run_pass("rmports");
+    // run_pass("opt_clean");
   }
 } TmrgPass;
 
