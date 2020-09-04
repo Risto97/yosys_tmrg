@@ -263,7 +263,7 @@ bool TMRModule(
       orig->fixup_ports();
     }
 
-    RTLIL::Cell *fn = orig->addCell(NEW_ID, "\\fanout");
+    RTLIL::Cell *fn = orig->addCell(w->name.str() + "_fanout", "\\fanout");
     dont_tmrg.first.emplace(fn);
     fn->setParam("\\WIDTH", 1);
     fn->setPort("\\in", w);
@@ -290,7 +290,7 @@ bool TMRModule(
       orig->fixup_ports();
     }
 
-    RTLIL::Cell *vt = orig->addCell(NEW_ID, "\\majorityVoter");
+    RTLIL::Cell *vt = orig->addCell(w->name.str() + "_voter", "\\majorityVoter");
     dont_tmrg.first.emplace(vt);
     vt->setParam("\\WIDTH", 1);
     vt->setPort("\\out", w);
@@ -300,7 +300,7 @@ bool TMRModule(
 
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
-    if (c->name.str()[0] == '\\' || dont_tmrg.first.count(c)) {
+    if (c->type.str()[0] == '\\' || dont_tmrg.first.count(c)) {
       continue;
     } else {
       for (auto s : {"A", "B", "C"}) {
@@ -338,7 +338,7 @@ bool TMRModule(
 
   /* Instantiate triplicated user modules as cells */
   for (auto c : orig->selected_cells()) {
-    if (c->name.str()[0] == '\\') {
+    if (c->type.str()[0] == '\\' && c->type.str() != "\\majorityVoter" && c->type.str() != "\\fanout") {
       //
       RTLIL::Cell *newcell = orig->addCell(NEW_ID, c->type);
       for (auto p : c->connections()) {
@@ -373,6 +373,17 @@ bool TMRModule(
   }
 
   /* Remove old wires */
+  for (auto w : remove_wires_list) {
+    for (auto c = orig->connections_.begin(); c < orig->connections_.end(); c++) {
+      if (c->first == w) {
+        orig->connections_.erase(c);
+      }
+      if (c->second == w) {
+        orig->connections_.erase(c);
+      }
+    }
+  }
+
   orig->remove(remove_wires_list);
 
   return true;

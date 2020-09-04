@@ -1,7 +1,10 @@
 MOD_NAME := fsm01
 
+tmrg_pass.so: tmrg_pass.cc
+	yosys-config --exec --cxx --cxxflags --ldflags -o $@ -shared $^ --ldlibs
+
 test: tmrg_pass.so
-	yosys -ql test1.log -m ./tmrg_pass.so -p "proc; debug tmrg_pass; show ${MOD_NAME}; write_verilog -norename -noattr out.v" fsm01.v voter.v fanout.v
+	yosys -ql test1.log -m ./tmrg_pass.so -p "proc; debug tmrg_pass; show fsm01; write_verilog -norename -noattr out.v" fsm01.v voter.v fanout.v
 	cat test1.log
 
 notmrg: tmrg_pass.so
@@ -32,8 +35,6 @@ generate: tmrg_pass.so
 	yosys -ql test1.log -m ./tmrg_pass.so -p "proc; debug tmrg_pass; show gen; write_verilog -norename -noattr out.v" tests/verilog/generate01.v voter.v fanout.v
 	cat test1.log
 
-tmrg_pass.so: tmrg_pass.cc
-	yosys-config --exec --cxx --cxxflags --ldflags -o $@ -shared $^ --ldlibs
 
 clean:
 	rm -f test1.log
