@@ -12,6 +12,31 @@
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
 
+struct TmrgPass : public Pass {
+  std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg;
+  pool<RTLIL::Wire *> remove_wires_list;
+  std::set<RTLIL::Wire *> voter_wires;
+  std::set<RTLIL::Wire *> fanout_wires;
+
+  bool TMRModule(RTLIL::Module *orig);
+
+  TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
+  void execute(std::vector<std::string>, RTLIL::Design *design) override {
+
+    log("#### Running TMRG PASS ####\n");
+
+    for (auto mod : design->selected_modules()) {
+      //   // TODO USE SELECTION to exclude voter and fanout???
+      if (mod->name.str() != "\\majorityVoter" && mod->name.str() != "\\fanout")
+        TMRModule(mod);
+    }
+
+    // run_pass("opt_clean");
+    // run_pass("rmports");
+    // run_pass("opt_clean");
+  }
+} TmrgPass;
+
 std::vector<std::string> split(const std::string &s, char delim) {
   std::vector<std::string> result;
   std::stringstream ss(s);
@@ -132,12 +157,13 @@ RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg, std::string s,
   return sig;
 }
 
-bool TMRModule(RTLIL::Module *orig) {
+bool TmrgPass::TMRModule(RTLIL::Module *orig) {
 
-  std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg;
-  pool<RTLIL::Wire *> remove_wires_list;
-  std::set<RTLIL::Wire *> voter_wires;
-  std::set<RTLIL::Wire *> fanout_wires;
+    dont_tmrg.first.clear();
+    dont_tmrg.second.clear();
+    remove_wires_list.clear();
+    voter_wires.clear();
+    fanout_wires.clear();
 
   /* Get a list of do not tmrg from attribute */
   if (orig->has_attribute("\\tmrg_do_not_triplicate")) {
@@ -397,22 +423,5 @@ bool TMRModule(RTLIL::Module *orig) {
   return true;
 }
 
-struct TmrgPass : public Pass {
-  TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
-  void execute(std::vector<std::string>, RTLIL::Design *design) override {
-
-    log("#### Running TMRG PASS ####\n");
-
-    for (auto mod : design->selected_modules()) {
-      //   // TODO USE SELECTION to exclude voter and fanout???
-      if (mod->name.str() != "\\majorityVoter" && mod->name.str() != "\\fanout")
-        TMRModule(mod);
-    }
-
-    // run_pass("opt_clean");
-    // run_pass("rmports");
-    // run_pass("opt_clean");
-  }
-} TmrgPass;
 
 PRIVATE_NAMESPACE_END
