@@ -116,8 +116,8 @@ std::vector<RTLIL::Wire *> group_statement_wires(RTLIL::Wire *wire,
   return wires;
 }
 
-RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg,
-                           std::string s, pool<RTLIL::Wire *> rm_wl) {
+RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg, std::string s,
+                           pool<RTLIL::Wire *> rm_wl) {
   RTLIL::SigSpec sig;
   for (auto chunk : sg.chunks()) {
     if (chunk.wire == NULL) {
@@ -294,15 +294,11 @@ bool TMRModule(RTLIL::Module *orig) {
           cell->setParam(p.first, p.second.as_int());
         }
         for (auto p : c->connections()) {
-          if (p.second.is_wire()) {
-            RTLIL::Wire *wire = addWire(orig, p.second, s);
-            cell->setPort(p.first.str(), wire);
-          } else if (p.second.is_fully_const()) {
-            RTLIL::SigSpec sig;
+          RTLIL::SigSpec sig;
+          if (p.second.is_fully_const()) {
             sig.append(p.second.as_const());
             cell->setPort(p.first.str(), sig);
           } else {
-            RTLIL::SigSpec sig;
             for (auto cn : p.second.chunks()) {
               if (cn.wire == NULL) {
                 for (auto state : cn.data)
@@ -310,6 +306,9 @@ bool TMRModule(RTLIL::Module *orig) {
               } else {
                 RTLIL::Wire *wire = addWire(orig, cn.wire, s);
                 sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
+                if (!dont_tmrg.second.count(cn.wire) &&
+                    !voter_wires.count(cn.wire) && !fanout_wires.count(cn.wire))
+                  remove_wires_list.emplace(cn.wire);
               }
             }
             cell->setPort(p.first.str(), sig);
@@ -326,18 +325,17 @@ bool TMRModule(RTLIL::Module *orig) {
         c->type.str() != "\\fanout") {
       //
       RTLIL::Cell *newcell = orig->addCell(NEW_ID, c->type);
+      for (auto p : c->parameters) {
+        newcell->setParam(p.first, p.second.as_int());
+      }
       for (auto p : c->connections()) {
         for (auto s : {"A", "B", "C"}) {
 
-          if (p.second.is_wire()) {
-            RTLIL::Wire *wire = addWire(orig, p.second, s);
-            newcell->setPort(p.first.str() + s, wire);
-          } else if (p.second.is_fully_const()) {
-            RTLIL::SigSpec sig;
+          RTLIL::SigSpec sig;
+          if (p.second.is_fully_const()) {
             sig.append(p.second.as_const());
             newcell->setPort(p.first.str() + s, sig);
           } else {
-            RTLIL::SigSpec sig;
             for (auto cn : p.second.chunks()) {
               if (cn.wire == NULL) {
                 for (auto state : cn.data)
@@ -345,6 +343,9 @@ bool TMRModule(RTLIL::Module *orig) {
               } else {
                 RTLIL::Wire *wire = addWire(orig, cn.wire, s);
                 sig.append(RTLIL::SigChunk(wire, cn.offset, cn.width));
+                if (!dont_tmrg.second.count(cn.wire) &&
+                    !voter_wires.count(cn.wire) && !fanout_wires.count(cn.wire))
+                  remove_wires_list.emplace(cn.wire);
               }
             }
             newcell->setPort(p.first.str() + s, sig);
