@@ -116,6 +116,22 @@ std::vector<RTLIL::Wire *> group_statement_wires(RTLIL::Wire *wire,
   return wires;
 }
 
+RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg,
+                           std::string s, pool<RTLIL::Wire *> rm_wl) {
+  RTLIL::SigSpec sig;
+  for (auto chunk : sg.chunks()) {
+    if (chunk.wire == NULL) {
+      for (auto state : chunk.data)
+        sig.append(state);
+    } else {
+      RTLIL::Wire *wire = addWire(mod, chunk.wire, s);
+      sig.append(RTLIL::SigChunk(wire, chunk.offset, chunk.width));
+      rm_wl.emplace(wire);
+    }
+  }
+  return sig;
+}
+
 bool TMRModule(RTLIL::Module *orig) {
 
   std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg;
@@ -166,53 +182,14 @@ bool TMRModule(RTLIL::Module *orig) {
 
   /* Get list of connections */
 
-  std::vector<std::pair<std::string, std::string>> conn_names;
-
   std::vector<RTLIL::SigSig> connection_list;
+
   for (auto con : orig->connections()) {
-    RTLIL::SigSpec first;
-    RTLIL::SigSpec second;
 
     for (auto s : {"A", "B", "C"}) {
-      if (con.first.is_wire()) {
-        RTLIL::Wire *wire = addWire(orig, con.first, s);
-        first = wire;
-
-      } else {
-        RTLIL::SigSpec sig;
-        for (auto c : con.first.chunks()) {
-          if (c.wire == NULL) {
-            for (auto state : c.data)
-              sig.append(state);
-          } else {
-            RTLIL::Wire *wire = addWire(orig, c.wire, s);
-            sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
-          }
-        }
-        first = sig;
-      }
-
-      if (con.second.is_wire()) {
-        RTLIL::Wire *wire = addWire(orig, con.second, s);
-        second = wire;
-
-      } else {
-        RTLIL::SigSpec sig;
-        for (auto c : con.second.chunks()) {
-          if (c.wire == NULL) {
-            for (auto state : c.data)
-              sig.append(state);
-          } else {
-            RTLIL::Wire *wire = addWire(orig, c.wire, s);
-            sig.append(RTLIL::SigChunk(wire, c.offset, c.width));
-          }
-        }
-        second = sig;
-      }
-
       RTLIL::SigSig connection;
-      connection.first = first;
-      connection.second = second;
+      connection.first = tmr_SigSpec(orig, con.first, s, remove_wires_list);
+      connection.second = tmr_SigSpec(orig, con.second, s, remove_wires_list);
       connection_list.push_back(connection);
     }
   }
@@ -244,7 +221,6 @@ bool TMRModule(RTLIL::Module *orig) {
     orig->fixup_ports();
   }
 
-  // orig->connections_.clear();
   /* Connecting Wires and Ports */
   for (auto pair : connection_list) {
     orig->connect(pair.first, pair.second);
@@ -273,9 +249,7 @@ bool TMRModule(RTLIL::Module *orig) {
     fn->setPort("\\in", w);
     for (auto s : {"A", "B", "C"})
       fn->setPort((std::string) "\\out" + s, orig->wire(w->name.str() + s));
-
   }
-
   // Adding voters
   for (auto w : voter_wires) {
     for (auto s : {"A", "B", "C"}) {
@@ -383,7 +357,7 @@ bool TMRModule(RTLIL::Module *orig) {
     }
   }
 
-  /* Remove old wires */
+  /* Remove old connections */
 
   for (auto c = orig->connections_.begin(); c < orig->connections_.end(); c++) {
     bool delete_conn = false;
