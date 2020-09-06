@@ -116,10 +116,9 @@ std::vector<RTLIL::Wire *> group_statement_wires(RTLIL::Wire *wire,
   return wires;
 }
 
-bool TMRModule(
-    RTLIL::Module *orig,
-    std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg) {
+bool TMRModule(RTLIL::Module *orig) {
 
+  std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg;
   pool<RTLIL::Wire *> remove_wires_list;
   std::set<RTLIL::Wire *> voter_wires;
   std::set<RTLIL::Wire *> fanout_wires;
@@ -428,12 +427,11 @@ struct TmrgPass : public Pass {
   void execute(std::vector<std::string>, RTLIL::Design *design) override {
 
     log("#### Running TMRG PASS ####\n");
-    std::pair<std::set<RTLIL::Cell *>, std::set<RTLIL::Wire *>> dont_tmrg_list;
 
     for (auto mod : design->selected_modules()) {
       //   // TODO USE SELECTION to exclude voter and fanout???
       if (mod->name.str() != "\\majorityVoter" && mod->name.str() != "\\fanout")
-        TMRModule(mod, dont_tmrg_list);
+        TMRModule(mod);
     }
 
     // run_pass("opt_clean");
