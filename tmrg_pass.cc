@@ -20,8 +20,8 @@ struct TmrgPass : public Pass {
   std::set<RTLIL::Wire *> fanout_wires;
 
   bool TMRModule(RTLIL::Module *orig);
-  void addVoter(RTLIL::Module *mod, RTLIL::Wire *w);
-  void addFanout(RTLIL::Module *mod, RTLIL::Wire *w);
+  bool addVoter(RTLIL::Module *mod, RTLIL::Wire *w);
+  bool addFanout(RTLIL::Module *mod, RTLIL::Wire *w);
 
   TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
   void execute(std::vector<std::string>, RTLIL::Design *design) override {
@@ -115,9 +115,12 @@ struct obj_src {
   int ln;
 };
 
-void TmrgPass::addFanout(RTLIL::Module *mod, RTLIL::Wire *w) {
+bool TmrgPass::addFanout(RTLIL::Module *mod, RTLIL::Wire *w) {
   remove_wires_list.erase(w);
   fanout_wires.emplace(w);
+  if(voter_wires.count(w))
+      return false;
+
   for (auto s : {"A", "B", "C"}) {
     RTLIL::Wire *wire = addWire(mod, w, s);
     if (wire->port_input)
@@ -138,11 +141,14 @@ void TmrgPass::addFanout(RTLIL::Module *mod, RTLIL::Wire *w) {
   fn->setPort("\\in", w);
   for (auto s : {"A", "B", "C"})
     fn->setPort((std::string) "\\out" + s, mod->wire(w->name.str() + s));
+  return true;
 }
 
-void TmrgPass::addVoter(RTLIL::Module *mod, RTLIL::Wire *w) {
+bool TmrgPass::addVoter(RTLIL::Module *mod, RTLIL::Wire *w) {
   remove_wires_list.erase(w);
   voter_wires.emplace(w);
+  if (fanout_wires.count(w))
+    return false;
   for (auto s : {"A", "B", "C"}) {
     RTLIL::Wire *wire = addWire(mod, w, s);
     if (wire->port_output) {
@@ -170,6 +176,7 @@ void TmrgPass::addVoter(RTLIL::Module *mod, RTLIL::Wire *w) {
   for (auto c = mod->connections_.begin(); c < mod->connections_.end(); c++)
     if (c->first == w || c->second == w)
       mod->connections_.erase(c);
+  return true;
 }
 
 bool obj_is_public(RTLIL::IdString obj) {
@@ -320,6 +327,8 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
 
   for (auto w : port_names) {
     RTLIL::Wire *port = orig->wire(w);
+    if(fanout_wires.count(port))
+        continue;
     for (auto s : {"A", "B", "C"}) {
       RTLIL::Wire *wire;
       if (orig->wires_.count(w + s) == 0)
@@ -344,61 +353,6 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
     orig->connect(pair.first, pair.second);
   }
 
-  // Add fanouts
-  for (auto w : fanout_wires) {
-    for (auto s : {"A", "B", "C"}) {
-      RTLIL::Wire *wire = addWire(orig, w, s);
-      if (wire->port_input)
-        w->port_input = true;
-      wire->port_input = false;
-      w->port_output = false;
-      wire->port_output = false;
-      orig->fixup_ports();
-      // Delete old connections that were in place of fanout input
-      for (auto c = orig->connections_.begin(); c < orig->connections_.end();
-           c++)
-        if (c->first == wire || c->second == wire)
-          orig->connections_.erase(c);
-    }
-
-    RTLIL::Cell *fn = orig->addCell(w->name.str() + "_fanout", "\\fanout");
-    dont_tmrg.first.emplace(fn);
-    fn->setParam("\\WIDTH", 1);
-    fn->setPort("\\in", w);
-    for (auto s : {"A", "B", "C"})
-      fn->setPort((std::string) "\\out" + s, orig->wire(w->name.str() + s));
-  }
-  // Adding voters
-  for (auto w : voter_wires) {
-    for (auto s : {"A", "B", "C"}) {
-      RTLIL::Wire *wire = addWire(orig, w, s);
-      if (wire->port_output) {
-        w->port_output = true;
-        w->port_input = false;
-        wire->port_output = false;
-        wire->port_input = false;
-      }
-      if (w->port_input) {
-        wire->port_input = true;
-        wire->port_output = false;
-        w->port_input = false;
-        w->port_output = false;
-      }
-      orig->fixup_ports();
-    }
-
-    RTLIL::Cell *vt =
-        orig->addCell(w->name.str() + "_voter", "\\majorityVoter");
-    dont_tmrg.first.emplace(vt);
-    vt->setParam("\\WIDTH", 1);
-    vt->setPort("\\out", w);
-    for (auto s : {"A", "B", "C"})
-      vt->setPort((std::string) "\\in" + s, orig->wire(w->name.str() + s));
-    // Delete old connection that was connected to fanout output wire
-    for (auto c = orig->connections_.begin(); c < orig->connections_.end(); c++)
-      if (c->first == w || c->second == w)
-        orig->connections_.erase(c);
-  }
 
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
@@ -447,9 +401,9 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
       for (auto p : c->connections()) {
         if (is_port_triplicated(p.first, c) == false) {
           if (c->input(p.first))
-            addVoter(orig, p.second.as_wire());
+              voter_wires.emplace(p.second.as_wire());
           else if (c->output(p.first))
-            addFanout(orig, p.second.as_wire());
+              fanout_wires.emplace(p.second.as_wire());
           newcell->setPort(p.first, p.second);
           continue;
         }
@@ -480,6 +434,15 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
       orig->remove(c);
       orig->rename(newcell, cell_name);
     }
+  }
+
+  // Add fanouts
+  for (auto w : fanout_wires) {
+    addFanout(orig, w);
+  }
+  // Adding voters
+  for (auto w : voter_wires) {
+    addVoter(orig, w);
   }
 
   /* Remove old connections */
