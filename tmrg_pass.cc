@@ -2,6 +2,7 @@
 #include "kernel/yosys.h"
 #include <cstddef>
 #include <iterator>
+#include <map>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -19,11 +20,28 @@ struct TmrgPass : public Pass {
   std::set<RTLIL::Wire *> fanout_wires;
 
   bool TMRModule(RTLIL::Module *orig);
+  void addVoter(RTLIL::Module *mod, RTLIL::Wire *w);
+  void addFanout(RTLIL::Module *mod, RTLIL::Wire *w);
 
   TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
   void execute(std::vector<std::string>, RTLIL::Design *design) override {
 
     log("#### Running TMRG PASS ####\n");
+
+    std::map<RTLIL::IdString, std::map<RTLIL::IdString, std::string>>
+        cell_attributes;
+    for (auto mod : design->selected_modules()) {
+      for (auto attr : mod->attributes)
+        cell_attributes[mod->name][attr.first] =
+            mod->get_string_attribute(attr.first);
+    }
+    for (auto mod : design->selected_modules()) {
+      for (auto c : mod->cells())
+        if (c->type.str()[0] == '\\' && c->type.str() != "\\majorityVoter" &&
+            c->type.str() != "\\fanout")
+          for (auto attr : cell_attributes[c->type])
+            c->set_string_attribute(attr.first, attr.second);
+    }
 
     for (auto mod : design->selected_modules()) {
       //   // TODO USE SELECTION to exclude voter and fanout???
@@ -56,6 +74,27 @@ bool TMR_wire_exist(RTLIL::Module *mod, RTLIL::IdString id, std::string sufix) {
     return false;
 }
 
+template <class T>
+pool<std::string> get_string_attributes(T *obj, std::string attr) {
+  if (obj->has_attribute(attr)) {
+    return obj->get_strpool_attribute(attr);
+  }
+  return pool<std::string>();
+}
+
+bool is_port_triplicated(RTLIL::IdString p, RTLIL::Cell *c) {
+  pool<std::string> cell_attr =
+      get_string_attributes(c, "\\tmrg_do_not_triplicate");
+  if (cell_attr.size() == 0)
+    return true;
+
+  if (cell_attr.count(p.str().substr(1)) >
+      0) // ignore first character (private, public)
+    return false;
+
+  return true;
+}
+
 RTLIL::Wire *addWire(RTLIL::Module *mod, RTLIL::SigSpec sig,
                      std::string sufix) {
   RTLIL::Wire *wire;
@@ -75,6 +114,63 @@ struct obj_src {
   std::string fn;
   int ln;
 };
+
+void TmrgPass::addFanout(RTLIL::Module *mod, RTLIL::Wire *w) {
+  remove_wires_list.erase(w);
+  fanout_wires.emplace(w);
+  for (auto s : {"A", "B", "C"}) {
+    RTLIL::Wire *wire = addWire(mod, w, s);
+    if (wire->port_input)
+      w->port_input = true;
+    wire->port_input = false;
+    w->port_output = false;
+    wire->port_output = false;
+    mod->fixup_ports();
+    // Delete old connections that were in place of fanout input
+    for (auto c = mod->connections_.begin(); c < mod->connections_.end(); c++)
+      if (c->first == wire || c->second == wire)
+        mod->connections_.erase(c);
+  }
+
+  RTLIL::Cell *fn = mod->addCell(w->name.str() + "_fanout", "\\fanout");
+  dont_tmrg.first.emplace(fn);
+  fn->setParam("\\WIDTH", 1);
+  fn->setPort("\\in", w);
+  for (auto s : {"A", "B", "C"})
+    fn->setPort((std::string) "\\out" + s, mod->wire(w->name.str() + s));
+}
+
+void TmrgPass::addVoter(RTLIL::Module *mod, RTLIL::Wire *w) {
+  remove_wires_list.erase(w);
+  voter_wires.emplace(w);
+  for (auto s : {"A", "B", "C"}) {
+    RTLIL::Wire *wire = addWire(mod, w, s);
+    if (wire->port_output) {
+      w->port_output = true;
+      w->port_input = false;
+      wire->port_output = false;
+      wire->port_input = false;
+    }
+    if (w->port_input) {
+      wire->port_input = true;
+      wire->port_output = false;
+      w->port_input = false;
+      w->port_output = false;
+    }
+    mod->fixup_ports();
+  }
+
+  RTLIL::Cell *vt = mod->addCell(w->name.str() + "_voter", "\\majorityVoter");
+  dont_tmrg.first.emplace(vt);
+  vt->setParam("\\WIDTH", 1);
+  vt->setPort("\\out", w);
+  for (auto s : {"A", "B", "C"})
+    vt->setPort((std::string) "\\in" + s, mod->wire(w->name.str() + s));
+  // Delete old connection that was connected to fanout output wire
+  for (auto c = mod->connections_.begin(); c < mod->connections_.end(); c++)
+    if (c->first == w || c->second == w)
+      mod->connections_.erase(c);
+}
 
 bool obj_is_public(RTLIL::IdString obj) {
   if (obj.str()[0] == '$')
@@ -159,21 +255,17 @@ RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg, std::string s,
 
 bool TmrgPass::TMRModule(RTLIL::Module *orig) {
 
-    dont_tmrg.first.clear();
-    dont_tmrg.second.clear();
-    remove_wires_list.clear();
-    voter_wires.clear();
-    fanout_wires.clear();
+  dont_tmrg.first.clear();
+  dont_tmrg.second.clear();
+  remove_wires_list.clear();
+  voter_wires.clear();
+  fanout_wires.clear();
 
   /* Get a list of do not tmrg from attribute */
-  if (orig->has_attribute("\\tmrg_do_not_triplicate")) {
-    std::string attr = orig->get_string_attribute("\\tmrg_do_not_triplicate");
-    std::vector<std::string> v = split(attr, ' ');
-    for (auto s : v) {
-      std::string wn = "\\" + s;
-      if (orig->wires_.count(wn))
-        dont_tmrg.second.emplace(orig->wire(wn));
-    }
+  pool<std::string> tmrg_do_not_triplicate_attr =
+      get_string_attributes(orig, "\\tmrg_do_not_triplicate");
+  for (auto s : tmrg_do_not_triplicate_attr) {
+    dont_tmrg.second.emplace(orig->wire("\\" + s));
   }
 
   /* Get list of do not tmrg Cells and Wires */
@@ -351,12 +443,18 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
         c->type.str() != "\\fanout") {
       //
       RTLIL::Cell *newcell = orig->addCell(NEW_ID, c->type);
-      for (auto p : c->parameters) {
-        newcell->setParam(p.first, p.second.as_int());
-      }
+      get_string_attributes(c, "\\tmrg_do_not_triplicate");
       for (auto p : c->connections()) {
-        for (auto s : {"A", "B", "C"}) {
+        if (is_port_triplicated(p.first, c) == false) {
+          if (c->input(p.first))
+            addVoter(orig, p.second.as_wire());
+          else if (c->output(p.first))
+            addFanout(orig, p.second.as_wire());
+          newcell->setPort(p.first, p.second);
+          continue;
+        }
 
+        for (auto s : {"A", "B", "C"}) {
           RTLIL::SigSpec sig;
           if (p.second.is_fully_const()) {
             sig.append(p.second.as_const());
@@ -422,6 +520,5 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
 
   return true;
 }
-
 
 PRIVATE_NAMESPACE_END
