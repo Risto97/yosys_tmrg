@@ -138,7 +138,7 @@ bool TmrgPass::addFanout(RTLIL::Module *mod, RTLIL::Wire *w) {
 
   RTLIL::Cell *fn = mod->addCell(w->name.str() + "_fanout", "\\fanout");
   dont_tmrg.first.emplace(fn);
-  fn->setParam("\\WIDTH", 1);
+  fn->setParam("\\WIDTH", w->width);
   fn->setPort("\\in", w);
   for (auto s : {"A", "B", "C"})
     fn->setPort((std::string) "\\out" + s, mod->wire(w->name.str() + s));
@@ -169,7 +169,7 @@ bool TmrgPass::addVoter(RTLIL::Module *mod, RTLIL::Wire *w) {
 
   RTLIL::Cell *vt = mod->addCell(w->name.str() + "_voter", "\\majorityVoter");
   dont_tmrg.first.emplace(vt);
-  vt->setParam("\\WIDTH", 1);
+  vt->setParam("\\WIDTH", w->width);
   vt->setPort("\\out", w);
   for (auto s : {"A", "B", "C"})
     vt->setPort((std::string) "\\in" + s, mod->wire(w->name.str() + s));
@@ -209,7 +209,11 @@ std::vector<RTLIL::Cell *> group_statement_cells(RTLIL::Wire *wire,
   std::vector<RTLIL::Cell *> statement_cells;
 
   for (auto c : mod->connections()) {
-    obj_src wsrc = find_obj_src(c.second.as_wire()->name);
+    if (c.second.chunks()[0].wire == NULL) {
+      log("Driving wire from statement is chunk, ERROR\n");
+      return std::vector<RTLIL::Cell *>();
+    }
+    obj_src wsrc = find_obj_src(c.second.chunks()[0].wire->name);
     if (c.first.as_wire() == wire && wsrc.is_private) {
 
       for (auto c : mod->selected_cells()) {
@@ -262,11 +266,11 @@ RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg, std::string s,
 }
 
 bool TmrgPass::conn_is_tmrg(RTLIL::SigSig con) {
-  for (auto c : con.first.chunks()) 
+  for (auto c : con.first.chunks())
     if (c.wire != NULL)
       if (dont_tmrg.second.count(c.wire) || dont_tmrg.second.count(c.wire))
         return false;
-  for (auto c : con.second.chunks()) 
+  for (auto c : con.second.chunks())
     if (c.wire != NULL)
       if (dont_tmrg.second.count(c.wire) || dont_tmrg.second.count(c.wire))
         return false;
