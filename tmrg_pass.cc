@@ -22,6 +22,7 @@ struct TmrgPass : public Pass {
   bool TMRModule(RTLIL::Module *orig);
   bool addVoter(RTLIL::Module *mod, RTLIL::Wire *w);
   bool addFanout(RTLIL::Module *mod, RTLIL::Wire *w);
+  bool conn_is_tmrg(RTLIL::SigSig con);
 
   TmrgPass() : Pass("tmrg_pass", "just a simple test") {}
   void execute(std::vector<std::string>, RTLIL::Design *design) override {
@@ -118,8 +119,8 @@ struct obj_src {
 bool TmrgPass::addFanout(RTLIL::Module *mod, RTLIL::Wire *w) {
   remove_wires_list.erase(w);
   fanout_wires.emplace(w);
-  if(voter_wires.count(w))
-      return false;
+  if (voter_wires.count(w))
+    return false;
 
   for (auto s : {"A", "B", "C"}) {
     RTLIL::Wire *wire = addWire(mod, w, s);
@@ -260,6 +261,19 @@ RTLIL::SigSpec tmr_SigSpec(RTLIL::Module *mod, RTLIL::SigSpec sg, std::string s,
   return sig;
 }
 
+bool TmrgPass::conn_is_tmrg(RTLIL::SigSig con) {
+  for (auto c : con.first.chunks()) 
+    if (c.wire != NULL)
+      if (dont_tmrg.second.count(c.wire) || dont_tmrg.second.count(c.wire))
+        return false;
+  for (auto c : con.second.chunks()) 
+    if (c.wire != NULL)
+      if (dont_tmrg.second.count(c.wire) || dont_tmrg.second.count(c.wire))
+        return false;
+
+  return true;
+}
+
 bool TmrgPass::TMRModule(RTLIL::Module *orig) {
 
   dont_tmrg.first.clear();
@@ -308,8 +322,11 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
   /* Get list of connections */
 
   std::vector<RTLIL::SigSig> connection_list;
-
   for (auto con : orig->connections()) {
+
+    if (!conn_is_tmrg(con)) {
+      continue;
+    }
 
     for (auto s : {"A", "B", "C"}) {
       RTLIL::SigSig connection;
@@ -327,8 +344,8 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
 
   for (auto w : port_names) {
     RTLIL::Wire *port = orig->wire(w);
-    if(fanout_wires.count(port))
-        continue;
+    if (fanout_wires.count(port))
+      continue;
     for (auto s : {"A", "B", "C"}) {
       RTLIL::Wire *wire;
       if (orig->wires_.count(w + s) == 0)
@@ -352,7 +369,6 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
   for (auto pair : connection_list) {
     orig->connect(pair.first, pair.second);
   }
-
 
   /* Triplicate yosys cells */
   for (auto c : orig->selected_cells()) {
@@ -401,9 +417,9 @@ bool TmrgPass::TMRModule(RTLIL::Module *orig) {
       for (auto p : c->connections()) {
         if (is_port_triplicated(p.first, c) == false) {
           if (c->input(p.first))
-              voter_wires.emplace(p.second.as_wire());
+            voter_wires.emplace(p.second.as_wire());
           else if (c->output(p.first))
-              fanout_wires.emplace(p.second.as_wire());
+            fanout_wires.emplace(p.second.as_wire());
           newcell->setPort(p.first, p.second);
           continue;
         }
